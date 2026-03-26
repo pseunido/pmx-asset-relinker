@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Windows.Forms;
+using System.Text.RegularExpressions;
 
 namespace PMXAssetRelinker
 {
@@ -18,7 +19,7 @@ namespace PMXAssetRelinker
 
         public Class1() : base()
         {
-            m_option = new PEPluginOption(false, true, "テクスチャ一括書き出し");
+            m_option = new PEPluginOption(false, true, "PMX Asset Relinker");
         }
 
         public override void Run(IPERunArgs args)
@@ -31,26 +32,49 @@ namespace PMXAssetRelinker
                 IPXPmx pmx = connect.Pmx.GetCurrentState();
                 if (pmx == null || string.IsNullOrEmpty(pmx.FilePath))
                 {
-                    MessageBox.Show("PMXモデルが読み込まれていません。");
+                    MessageBox.Show("モデルが読み込まれていません。");
                     return;
                 }
                 string modelPath = pmx.FilePath;
                 modelDir = Path.GetDirectoryName(modelPath);
                 if (string.IsNullOrEmpty(modelDir))
                 {
-                    MessageBox.Show("モデルのパスの取得に失敗しました。");
-                    return;
+                    throw new InvalidOperationException("モデルのパスの取得に失敗しました。");
+                }
+                // 正規化して末尾に区切り文字を扱いやすくする
+                try
+                {
+                    modelDir = Path.GetFullPath(modelDir);
+                }
+                catch (Exception ex)
+                {
+                    throw new InvalidOperationException("モデルのパスの正規化に失敗しました。", ex);
                 }
                 // ===== UI表示 =====
                 if (!ShowForm())
                     return;
 
-                assetsDir = Path.Combine(outputDir, subFolderName);
+                // サブフォルダ名が空ならサブフォルダを作らず、出力先は outputDir 自身にする
+                if (string.IsNullOrEmpty(subFolderName))
+                {
+                    assetsDir = outputDir;
+                }
+                else
+                {
+                    assetsDir = Path.Combine(outputDir, subFolderName);
+                }
 
+                // 既にファイルがあるか確認
                 if (Directory.Exists(assetsDir) && Directory.EnumerateFiles(assetsDir, "*", SearchOption.AllDirectories).Any())
                 {
+                    string msg;
+                    if (string.IsNullOrEmpty(subFolderName))
+                        msg = "出力フォルダ内に既にファイルがあります。上書きしますか？";
+                    else
+                        msg = $"{subFolderName}フォルダ内に既にファイルがあります。上書きしますか？";
+
                     var result = MessageBox.Show(
-                        "assetsフォルダ内に既にファイルがあります。上書きしますか？",
+                        msg,
                         "確認",
                         MessageBoxButtons.YesNo,
                         MessageBoxIcon.Warning
@@ -60,6 +84,7 @@ namespace PMXAssetRelinker
                         return;
                 }
 
+                // assetsDir を作成（assetsDir が outputDir の場合でも CreateDirectory は安全）
                 Directory.CreateDirectory(assetsDir);
 
                 copied = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -68,16 +93,41 @@ namespace PMXAssetRelinker
                 {
                     mat.Tex = ProcessPath(mat.Tex);
                     mat.Sphere = ProcessPath(mat.Sphere);
-                    mat.Toon = ProcessPath(mat.Toon);
+                    mat.Toon = ProcessPath(mat.Toon, true);
                 }
 
-                args.Host.Connector.Pmx.Update(pmx);
-                args.Host.Connector.Form.UpdateList(PEPlugin.Pmd.UpdateObject.Header);
+                // 書き出し後にモデルを出力先へ保存する（ホストAPIを利用）
+                connect.Pmx.Update(pmx);
+                try
+                {
+                    var modelFileName = Path.GetFileName(modelPath);
+                    if (!string.IsNullOrEmpty(modelFileName))
+                    {
+                        var saveDir = outputDir;
+                        var savePath = Path.Combine(saveDir, modelFileName);
+
+                        // ホストの保存APIを使って内部的に保存
+                        connect.Form.SavePMXFile(savePath);
+
+                        // 保存に成功したので pmx.FilePath を新しい場所に更新
+                        pmx.FilePath = savePath;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // 保存に失敗した場合は例外を握って続行する
+                    // 外側の catch でまとめて表示されるようにするためここでは何もしない
+                    // 必要ならログ出力を追加
+                    System.Diagnostics.Trace.TraceWarning($"PMX の保存に失敗しました: {ex.Message}");
+                }
+
+                connect.Form.UpdateList(PEPlugin.Pmd.UpdateObject.Header);
+                connect.View.PMDView.UpdateModel();
+                connect.View.PMDView.UpdateView();
 
                 MessageBox.Show(
                     "書き出し完了！" + Environment.NewLine + Environment.NewLine +
-                    "※ 元のPMXデータは既に変更されています。" + Environment.NewLine +
-                    "必ず出力フォルダに別名で保存してください。",
+                    "現在のモデルは出力フォルダ内に保存されました。",
                     "完了",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Warning
@@ -91,102 +141,142 @@ namespace PMXAssetRelinker
 
         private bool ShowForm()
         {
-            Form form = new Form();
-            form.Text = "書き出し設定";
-            form.Width = 600;
-            form.Height = 180;
-
-            System.Windows.Forms.Label lblDir = new System.Windows.Forms.Label() { Text = "出力フォルダ", Left = 10, Top = 20, Width = 100 };
-            TextBox txtDir = new TextBox() { Left = 110, Top = 20, Width = 400 };
-            Button btnBrowse = new Button() { Text = "...", Left = 520, Top = 18, Width = 40 };
-
-            System.Windows.Forms.Label lblSub = new System.Windows.Forms.Label() { Text = "サブフォルダ名", Left = 10, Top = 60, Width = 100 };
-            TextBox txtSub = new TextBox() { Left = 110, Top = 60, Width = 400, Text = subFolderName };
-
-            Button btnOK = new Button() { Text = "実行", Left = 250, Top = 100, Width = 80 };
-            btnOK.DialogResult = DialogResult.OK;
-
-            txtDir.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
-            btnBrowse.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            txtSub.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
-
-            // ===== フォルダ選択 =====
-            btnBrowse.Click += (s, e) =>
+            using (var form = new Form())
             {
-                using (var fbd = new FolderBrowserDialog())
+                form.Text = "書き出し設定";
+                form.Width = 600;
+                form.Height = 180;
+                form.StartPosition = FormStartPosition.CenterParent;
+
+                System.Windows.Forms.Label lblDir = new System.Windows.Forms.Label() { Text = "出力フォルダ", Left = 10, Top = 20, Width = 100 };
+                TextBox txtDir = new TextBox() { Left = 110, Top = 20, Width = 400, Text = outputDir };
+                Button btnBrowse = new Button() { Text = "...", Left = 520, Top = 18, Width = 40 };
+
+                System.Windows.Forms.Label lblSub = new System.Windows.Forms.Label() { Text = "サブフォルダ名", Left = 10, Top = 60, Width = 100 };
+                TextBox txtSub = new TextBox() { Left = 110, Top = 60, Width = 400, Text = subFolderName };
+
+                Button btnOK = new Button() { Text = "実行", Left = 250, Top = 100, Width = 80 };
+                btnOK.DialogResult = DialogResult.OK;
+
+                txtDir.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+                btnBrowse.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+                txtSub.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+
+                // ===== フォルダ選択 =====
+                btnBrowse.Click += (s, e) =>
                 {
-                    if (fbd.ShowDialog() == DialogResult.OK)
-                        txtDir.Text = fbd.SelectedPath;
-                }
-            };
+                    using (var fbd = new FolderBrowserDialog())
+                    {
+                        if (fbd.ShowDialog() == DialogResult.OK)
+                            txtDir.Text = fbd.SelectedPath;
+                    }
+                };
 
-            // ===== ドラッグ＆ドロップ対応 =====
-            txtDir.AllowDrop = true;
+                // ===== ドラッグ＆ドロップ対応 =====
+                txtDir.AllowDrop = true;
 
-            txtDir.DragEnter += (s, e) =>
-            {
-                if (e.Data.GetDataPresent(DataFormats.FileDrop))
-                    e.Effect = DragDropEffects.Copy;
-            };
-
-            txtDir.DragDrop += (s, e) =>
-            {
-                var paths = (string[])e.Data.GetData(DataFormats.FileDrop);
-                if (paths.Length > 0 && Directory.Exists(paths[0]))
+                txtDir.DragEnter += (s, e) =>
                 {
-                    txtDir.Text = paths[0];
+                    if (e.Data.GetDataPresent(DataFormats.FileDrop))
+                        e.Effect = DragDropEffects.Copy;
+                };
+
+                txtDir.DragDrop += (s, e) =>
+                {
+                    var paths = (string[])e.Data.GetData(DataFormats.FileDrop);
+                    if (paths.Length > 0 && Directory.Exists(paths[0]))
+                        txtDir.Text = paths[0];
+                };
+
+                form.Controls.Add(lblDir);
+                form.Controls.Add(txtDir);
+                form.Controls.Add(btnBrowse);
+                form.Controls.Add(lblSub);
+                form.Controls.Add(txtSub);
+                form.Controls.Add(btnOK);
+
+                form.AcceptButton = btnOK;
+
+                if (form.ShowDialog() != DialogResult.OK)
+                    return false;
+
+                if (string.IsNullOrWhiteSpace(txtDir.Text))
+                {
+                    MessageBox.Show("出力フォルダを指定してください");
+                    return false;
                 }
-            };
 
-            form.Controls.Add(lblDir);
-            form.Controls.Add(txtDir);
-            form.Controls.Add(btnBrowse);
-            form.Controls.Add(lblSub);
-            form.Controls.Add(txtSub);
-            form.Controls.Add(btnOK);
+                outputDir = txtDir.Text;
+                // 空欄の場合はサブフォルダを作らない（空文字のまま保持）
+                subFolderName = txtSub.Text ?? string.Empty;
 
-            form.AcceptButton = btnOK;
-
-            if (form.ShowDialog() != DialogResult.OK)
-                return false;
-
-            if (string.IsNullOrWhiteSpace(txtDir.Text))
-            {
-                MessageBox.Show("出力フォルダを指定してください");
-                return false;
+                return true;
             }
-
-            outputDir = txtDir.Text;
-            subFolderName = string.IsNullOrWhiteSpace(txtSub.Text) ? "assets" : txtSub.Text;
-
-            return true;
         }
 
         private string ProcessPath(string path)
         {
+            return ProcessPath(path, false);
+        }
+
+        private string ProcessPath(string path, bool isToon)
+        {
             if (string.IsNullOrWhiteSpace(path))
                 return path;
 
-            string fullPath = Path.Combine(modelDir, path);
+            // 絶対パス化
+            string fullPath = path;
+            try
+            {
+                if (!Path.IsPathRooted(path))
+                    fullPath = Path.GetFullPath(Path.Combine(modelDir, path));
+                else
+                    fullPath = Path.GetFullPath(path);
+            }
+            catch
+            {
+                // Path.GetFullPath が失敗したら元の値を使う
+                fullPath = Path.Combine(modelDir, path);
+            }
 
             if (!File.Exists(fullPath))
             {
-                var exeDir = AppDomain.CurrentDomain.BaseDirectory;
-                var toonPath = Path.Combine(exeDir, "toon", path);
+                var fileName = Path.GetFileName(path);
 
-                if (File.Exists(toonPath))
-                    fullPath = toonPath;
-                else
-                    return path;
+                // toon 処理の場合のみデフォルトtoonの特別扱いを行う
+                if (isToon && !string.IsNullOrEmpty(fileName) && Regex.IsMatch(fileName, "^toon\\d{1,2}\\.bmp$", RegexOptions.IgnoreCase))
+                {
+                    var exeDir = AppDomain.CurrentDomain.BaseDirectory;
+                    var toonPathData = Path.Combine(exeDir, "_data", "toon", fileName);
+                    var toonPath = Path.Combine(exeDir, "toon", fileName);
+
+                    if (File.Exists(toonPathData) || File.Exists(toonPath))
+                    {
+                        // アプリのデフォルトtoonが存在する -> コピーせず元の指定を維持
+                        return path;
+                    }
+
+                    // どちらにも無ければ見つからない扱い
+                    throw new FileNotFoundException($"ファイルが見つかりません: {path}", fullPath);
+                }
+
+                // toon以外はモデル相対パスのみを期待するため見つからなければエラー
+                throw new FileNotFoundException($"ファイルが見つかりません: {path}", fullPath);
             }
 
-            if (!copied.ContainsKey(fullPath))
+            // copied のキーは正規化したフルパスを使う
+            string key = fullPath;
+
+            if (!copied.ContainsKey(key))
             {
                 string relativePath;
 
-                if (fullPath.StartsWith(modelDir, StringComparison.OrdinalIgnoreCase))
+                // modelDir の末尾に区切り文字を追加して部分一致の誤判定を避ける
+                var modelDirForCompare = modelDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+
+                if (fullPath.StartsWith(modelDirForCompare, StringComparison.OrdinalIgnoreCase))
                 {
-                    relativePath = fullPath.Substring(modelDir.Length).TrimStart('\\', '/');
+                    relativePath = fullPath.Substring(modelDirForCompare.Length).TrimStart('\\', '/');
                 }
                 else
                 {
@@ -194,7 +284,9 @@ namespace PMXAssetRelinker
                 }
 
                 string destPath = Path.Combine(assetsDir, relativePath);
-                Directory.CreateDirectory(Path.GetDirectoryName(destPath));
+                var destDir = Path.GetDirectoryName(destPath);
+                if (!string.IsNullOrEmpty(destDir))
+                    Directory.CreateDirectory(destDir);
 
                 try
                 {
@@ -202,22 +294,19 @@ namespace PMXAssetRelinker
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show(
-                        $"コピーに失敗しました:\n{fullPath}\n\n{ex.Message}",
-                        "エラー",
-                        MessageBoxButtons.OK,
-                        MessageBoxIcon.Exclamation
-                    );
-                    return path;
+                    throw new IOException($"ファイルのコピーに失敗しました: {fullPath}", ex);
                 }
 
-                string pmxPath = Path.Combine(subFolderName, relativePath).Replace("\\", "/");
+                string pmxPath;
+                if (string.IsNullOrEmpty(subFolderName))
+                    pmxPath = relativePath.Replace("\\", "/");
+                else
+                    pmxPath = Path.Combine(subFolderName, relativePath).Replace("\\", "/");
 
-                copied[fullPath] = pmxPath;
+                copied[key] = pmxPath;
             }
 
-            return copied[fullPath];
+            return copied[key];
         }
     }
-
 }
