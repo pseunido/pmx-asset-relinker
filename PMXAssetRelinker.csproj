@@ -32,11 +32,11 @@
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="PEPlugin">
-      <HintPath>..\..\..\..\..\MMD\Applications\PmxEditor_0273\Lib\PEPlugin\PEPlugin.dll</HintPath>
+      <HintPath>libs\PEPlugin\PEPlugin.dll</HintPath>
       <Private>False</Private>
     </Reference>
     <Reference Include="SlimDX">
-      <HintPath>..\..\..\..\..\MMD\Applications\PmxEditor_0273\Lib\SlimDX\x64\SlimDX.dll</HintPath>
+      <HintPath>libs\SlimDX\x64\SlimDX.dll</HintPath>
       <Private>False</Private>
     </Reference>
     <Reference Include="System" />
