@@ -59,5 +59,8 @@
   <ItemGroup>
     <None Include="LICENSE" />
   </ItemGroup>
+  <ItemGroup>
+    <Content Include="README.png" />
+  </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>
