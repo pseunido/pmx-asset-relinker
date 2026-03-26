@@ -18,7 +18,7 @@ namespace PMXAssetRelinker
 
         public Class1() : base()
         {
-            m_option = new PEPluginOption(false, true, "テクスチャ一括書き出し");
+            m_option = new PEPluginOption(false, true, "PMX Asset Relinker");
         }
 
         public override void Run(IPERunArgs args)
@@ -53,12 +53,27 @@ namespace PMXAssetRelinker
                 if (!ShowForm())
                     return;
 
-                assetsDir = Path.Combine(outputDir, subFolderName);
+                // サブフォルダ名が空ならサブフォルダを作らず、出力先は outputDir 自身にする
+                if (string.IsNullOrEmpty(subFolderName))
+                {
+                    assetsDir = outputDir;
+                }
+                else
+                {
+                    assetsDir = Path.Combine(outputDir, subFolderName);
+                }
 
+                // 既にファイルがあるか確認
                 if (Directory.Exists(assetsDir) && Directory.EnumerateFiles(assetsDir, "*", SearchOption.AllDirectories).Any())
                 {
+                    string msg;
+                    if (string.IsNullOrEmpty(subFolderName))
+                        msg = "出力フォルダ内に既にファイルがあります。上書きしますか？";
+                    else
+                        msg = $"{subFolderName}フォルダ内に既にファイルがあります。上書きしますか？";
+
                     var result = MessageBox.Show(
-                        $"{subFolderName}フォルダ内に既にファイルがあります。上書きしますか？",
+                        msg,
                         "確認",
                         MessageBoxButtons.YesNo,
                         MessageBoxIcon.Warning
@@ -68,6 +83,7 @@ namespace PMXAssetRelinker
                         return;
                 }
 
+                // assetsDir を作成（assetsDir が outputDir の場合でも CreateDirectory は安全）
                 Directory.CreateDirectory(assetsDir);
 
                 copied = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -79,6 +95,30 @@ namespace PMXAssetRelinker
                     mat.Toon = ProcessPath(mat.Toon);
                 }
 
+                // 書き出し後にモデルを出力先へ保存する（ホストAPIを利用）
+                try
+                {
+                    var modelFileName = Path.GetFileName(modelPath);
+                    if (!string.IsNullOrEmpty(modelFileName))
+                    {
+                        var saveDir = outputDir;
+                        var savePath = Path.Combine(saveDir, modelFileName);
+
+                        // ホストの保存APIを使って内部的に保存
+                        connect.Form.SavePMXFile(savePath);
+
+                        // 保存に成功したので pmx.FilePath を新しい場所に更新
+                        pmx.FilePath = savePath;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // 保存に失敗した場合は例外を握って続行する
+                    // 外側の catch でまとめて表示されるようにするためここでは何もしない
+                    // 必要ならログ出力を追加
+                    System.Diagnostics.Trace.TraceWarning($"PMX の保存に失敗しました: {ex.Message}");
+                }
+
                 connect.Pmx.Update(pmx);
                 connect.Form.UpdateList(PEPlugin.Pmd.UpdateObject.Header);
                 connect.View.PMDView.UpdateModel();
@@ -86,8 +126,7 @@ namespace PMXAssetRelinker
 
                 MessageBox.Show(
                     "書き出し完了！" + Environment.NewLine + Environment.NewLine +
-                    "※　モデルは変更されています。" + Environment.NewLine +
-                    "　　必ず出力フォルダに別名で保存してください。",
+                    "現在のモデルは出力フォルダ内に保存されました。",
                     "完了",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Warning
@@ -169,7 +208,8 @@ namespace PMXAssetRelinker
             }
 
                 outputDir = txtDir.Text;
-                subFolderName = string.IsNullOrWhiteSpace(txtSub.Text) ? "assets" : txtSub.Text;
+                // 空欄の場合はサブフォルダを作らない（空文字のまま保持）
+                subFolderName = txtSub.Text ?? string.Empty;
 
                 return true;
             }
@@ -239,7 +279,11 @@ namespace PMXAssetRelinker
                     throw new IOException($"ファイルのコピーに失敗しました: {fullPath}", ex);
                 }
 
-                string pmxPath = Path.Combine(subFolderName, relativePath).Replace("\\", "/");
+                string pmxPath;
+                if (string.IsNullOrEmpty(subFolderName))
+                    pmxPath = relativePath.Replace("\\", "/");
+                else
+                    pmxPath = Path.Combine(subFolderName, relativePath).Replace("\\", "/");
 
                 copied[key] = pmxPath;
             }
