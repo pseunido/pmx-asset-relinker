@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Windows.Forms;
+using System.Text.RegularExpressions;
 
 namespace PMXAssetRelinker
 {
@@ -92,7 +93,7 @@ namespace PMXAssetRelinker
                 {
                     mat.Tex = ProcessPath(mat.Tex);
                     mat.Sphere = ProcessPath(mat.Sphere);
-                    mat.Toon = ProcessPath(mat.Toon);
+                    mat.Toon = ProcessPath(mat.Toon, true);
                 }
 
                 // 書き出し後にモデルを出力先へ保存する（ホストAPIを利用）
@@ -215,6 +216,11 @@ namespace PMXAssetRelinker
 
         private string ProcessPath(string path)
         {
+            return ProcessPath(path, false);
+        }
+
+        private string ProcessPath(string path, bool isToon)
+        {
             if (string.IsNullOrWhiteSpace(path))
                 return path;
 
@@ -235,13 +241,27 @@ namespace PMXAssetRelinker
 
             if (!File.Exists(fullPath))
             {
-                var exeDir = AppDomain.CurrentDomain.BaseDirectory;
-                var toonPath = Path.Combine(exeDir, "toon", path);
+                var fileName = Path.GetFileName(path);
 
-                if (File.Exists(toonPath))
-                    fullPath = Path.GetFullPath(toonPath);
-                else
+                // toon 処理の場合のみデフォルトtoonの特別扱いを行う
+                if (isToon && !string.IsNullOrEmpty(fileName) && Regex.IsMatch(fileName, "^toon\\d{1,2}\\.bmp$", RegexOptions.IgnoreCase))
+                {
+                    var exeDir = AppDomain.CurrentDomain.BaseDirectory;
+                    var toonPathData = Path.Combine(exeDir, "_data", "toon", fileName);
+                    var toonPath = Path.Combine(exeDir, "toon", fileName);
+
+                    if (File.Exists(toonPathData) || File.Exists(toonPath))
+                    {
+                        // アプリのデフォルトtoonが存在する -> コピーせず元の指定を維持
+                        return path;
+                    }
+
+                    // どちらにも無ければ見つからない扱い
                     throw new FileNotFoundException($"ファイルが見つかりません: {path}", fullPath);
+                }
+
+                // toon以外はモデル相対パスのみを期待するため見つからなければエラー
+                throw new FileNotFoundException($"ファイルが見つかりません: {path}", fullPath);
             }
 
             // copied のキーは正規化したフルパスを使う
