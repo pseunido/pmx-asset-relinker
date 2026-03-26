@@ -31,15 +31,23 @@ namespace PMXAssetRelinker
                 IPXPmx pmx = connect.Pmx.GetCurrentState();
                 if (pmx == null || string.IsNullOrEmpty(pmx.FilePath))
                 {
-                    MessageBox.Show("PMXモデルが読み込まれていません。");
+                    MessageBox.Show("モデルが読み込まれていません。");
                     return;
                 }
                 string modelPath = pmx.FilePath;
                 modelDir = Path.GetDirectoryName(modelPath);
                 if (string.IsNullOrEmpty(modelDir))
                 {
-                    MessageBox.Show("モデルのパスの取得に失敗しました。");
-                    return;
+                    throw new InvalidOperationException("モデルのパスの取得に失敗しました。");
+                }
+                // 正規化して末尾に区切り文字を扱いやすくする
+                try
+                {
+                    modelDir = Path.GetFullPath(modelDir);
+                }
+                catch (Exception ex)
+                {
+                    throw new InvalidOperationException("モデルのパスの正規化に失敗しました。", ex);
                 }
                 // ===== UI表示 =====
                 if (!ShowForm())
@@ -50,7 +58,7 @@ namespace PMXAssetRelinker
                 if (Directory.Exists(assetsDir) && Directory.EnumerateFiles(assetsDir, "*", SearchOption.AllDirectories).Any())
                 {
                     var result = MessageBox.Show(
-                        "assetsフォルダ内に既にファイルがあります。上書きしますか？",
+                        $"{subFolderName}フォルダ内に既にファイルがあります。上書きしますか？",
                         "確認",
                         MessageBoxButtons.YesNo,
                         MessageBoxIcon.Warning
@@ -76,8 +84,8 @@ namespace PMXAssetRelinker
 
                 MessageBox.Show(
                     "書き出し完了！" + Environment.NewLine + Environment.NewLine +
-                    "※ 元のPMXデータは既に変更されています。" + Environment.NewLine +
-                    "必ず出力フォルダに別名で保存してください。",
+                    "※　モデルは変更されています。" + Environment.NewLine +
+                    "　　必ず出力フォルダに別名で保存してください。",
                     "完了",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Warning
@@ -91,13 +99,15 @@ namespace PMXAssetRelinker
 
         private bool ShowForm()
         {
-            Form form = new Form();
-            form.Text = "書き出し設定";
-            form.Width = 600;
-            form.Height = 180;
+            using (var form = new Form())
+            {
+                form.Text = "書き出し設定";
+                form.Width = 600;
+                form.Height = 180;
+                form.StartPosition = FormStartPosition.CenterParent;
 
             System.Windows.Forms.Label lblDir = new System.Windows.Forms.Label() { Text = "出力フォルダ", Left = 10, Top = 20, Width = 100 };
-            TextBox txtDir = new TextBox() { Left = 110, Top = 20, Width = 400 };
+            TextBox txtDir = new TextBox() { Left = 110, Top = 20, Width = 400, Text = outputDir };
             Button btnBrowse = new Button() { Text = "...", Left = 520, Top = 18, Width = 40 };
 
             System.Windows.Forms.Label lblSub = new System.Windows.Forms.Label() { Text = "サブフォルダ名", Left = 10, Top = 60, Width = 100 };
@@ -138,17 +148,17 @@ namespace PMXAssetRelinker
                 }
             };
 
-            form.Controls.Add(lblDir);
-            form.Controls.Add(txtDir);
-            form.Controls.Add(btnBrowse);
-            form.Controls.Add(lblSub);
-            form.Controls.Add(txtSub);
-            form.Controls.Add(btnOK);
+                form.Controls.Add(lblDir);
+                form.Controls.Add(txtDir);
+                form.Controls.Add(btnBrowse);
+                form.Controls.Add(lblSub);
+                form.Controls.Add(txtSub);
+                form.Controls.Add(btnOK);
 
-            form.AcceptButton = btnOK;
+                form.AcceptButton = btnOK;
 
-            if (form.ShowDialog() != DialogResult.OK)
-                return false;
+                if (form.ShowDialog() != DialogResult.OK)
+                    return false;
 
             if (string.IsNullOrWhiteSpace(txtDir.Text))
             {
@@ -156,10 +166,11 @@ namespace PMXAssetRelinker
                 return false;
             }
 
-            outputDir = txtDir.Text;
-            subFolderName = string.IsNullOrWhiteSpace(txtSub.Text) ? "assets" : txtSub.Text;
+                outputDir = txtDir.Text;
+                subFolderName = string.IsNullOrWhiteSpace(txtSub.Text) ? "assets" : txtSub.Text;
 
-            return true;
+                return true;
+            }
         }
 
         private string ProcessPath(string path)
@@ -167,7 +178,20 @@ namespace PMXAssetRelinker
             if (string.IsNullOrWhiteSpace(path))
                 return path;
 
-            string fullPath = Path.Combine(modelDir, path);
+            // 絶対パス化
+            string fullPath = path;
+            try
+            {
+                if (!Path.IsPathRooted(path))
+                    fullPath = Path.GetFullPath(Path.Combine(modelDir, path));
+                else
+                    fullPath = Path.GetFullPath(path);
+            }
+            catch
+            {
+                // Path.GetFullPath が失敗したら元の値を使う
+                fullPath = Path.Combine(modelDir, path);
+            }
 
             if (!File.Exists(fullPath))
             {
@@ -175,18 +199,24 @@ namespace PMXAssetRelinker
                 var toonPath = Path.Combine(exeDir, "toon", path);
 
                 if (File.Exists(toonPath))
-                    fullPath = toonPath;
+                    fullPath = Path.GetFullPath(toonPath);
                 else
-                    return path;
+                    throw new FileNotFoundException($"ファイルが見つかりません: {path}", fullPath);
             }
 
-            if (!copied.ContainsKey(fullPath))
+            // copied のキーは正規化したフルパスを使う
+            string key = fullPath;
+
+            if (!copied.ContainsKey(key))
             {
                 string relativePath;
 
-                if (fullPath.StartsWith(modelDir, StringComparison.OrdinalIgnoreCase))
+                // modelDir の末尾に区切り文字を追加して部分一致の誤判定を避ける
+                var modelDirForCompare = modelDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+
+                if (fullPath.StartsWith(modelDirForCompare, StringComparison.OrdinalIgnoreCase))
                 {
-                    relativePath = fullPath.Substring(modelDir.Length).TrimStart('\\', '/');
+                    relativePath = fullPath.Substring(modelDirForCompare.Length).TrimStart('\\', '/');
                 }
                 else
                 {
@@ -194,7 +224,9 @@ namespace PMXAssetRelinker
                 }
 
                 string destPath = Path.Combine(assetsDir, relativePath);
-                Directory.CreateDirectory(Path.GetDirectoryName(destPath));
+                var destDir = Path.GetDirectoryName(destPath);
+                if (!string.IsNullOrEmpty(destDir))
+                    Directory.CreateDirectory(destDir);
 
                 try
                 {
@@ -202,22 +234,15 @@ namespace PMXAssetRelinker
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show(
-                        $"コピーに失敗しました:\n{fullPath}\n\n{ex.Message}",
-                        "エラー",
-                        MessageBoxButtons.OK,
-                        MessageBoxIcon.Exclamation
-                    );
-                    return path;
+                    throw new IOException($"ファイルのコピーに失敗しました: {fullPath}", ex);
                 }
 
                 string pmxPath = Path.Combine(subFolderName, relativePath).Replace("\\", "/");
 
-                copied[fullPath] = pmxPath;
+                copied[key] = pmxPath;
             }
 
-            return copied[fullPath];
+            return copied[key];
         }
     }
-
 }
