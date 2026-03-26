@@ -96,6 +96,7 @@ namespace PMXAssetRelinker
                 }
 
                 // 書き出し後にモデルを出力先へ保存する（ホストAPIを利用）
+                connect.Pmx.Update(pmx);
                 try
                 {
                     var modelFileName = Path.GetFileName(modelPath);
@@ -119,7 +120,6 @@ namespace PMXAssetRelinker
                     System.Diagnostics.Trace.TraceWarning($"PMX の保存に失敗しました: {ex.Message}");
                 }
 
-                connect.Pmx.Update(pmx);
                 connect.Form.UpdateList(PEPlugin.Pmd.UpdateObject.Header);
                 connect.View.PMDView.UpdateModel();
                 connect.View.PMDView.UpdateView();
@@ -147,47 +147,45 @@ namespace PMXAssetRelinker
                 form.Height = 180;
                 form.StartPosition = FormStartPosition.CenterParent;
 
-            System.Windows.Forms.Label lblDir = new System.Windows.Forms.Label() { Text = "出力フォルダ", Left = 10, Top = 20, Width = 100 };
-            TextBox txtDir = new TextBox() { Left = 110, Top = 20, Width = 400, Text = outputDir };
-            Button btnBrowse = new Button() { Text = "...", Left = 520, Top = 18, Width = 40 };
+                System.Windows.Forms.Label lblDir = new System.Windows.Forms.Label() { Text = "出力フォルダ", Left = 10, Top = 20, Width = 100 };
+                TextBox txtDir = new TextBox() { Left = 110, Top = 20, Width = 400, Text = outputDir };
+                Button btnBrowse = new Button() { Text = "...", Left = 520, Top = 18, Width = 40 };
 
-            System.Windows.Forms.Label lblSub = new System.Windows.Forms.Label() { Text = "サブフォルダ名", Left = 10, Top = 60, Width = 100 };
-            TextBox txtSub = new TextBox() { Left = 110, Top = 60, Width = 400, Text = subFolderName };
+                System.Windows.Forms.Label lblSub = new System.Windows.Forms.Label() { Text = "サブフォルダ名", Left = 10, Top = 60, Width = 100 };
+                TextBox txtSub = new TextBox() { Left = 110, Top = 60, Width = 400, Text = subFolderName };
 
-            Button btnOK = new Button() { Text = "実行", Left = 250, Top = 100, Width = 80 };
-            btnOK.DialogResult = DialogResult.OK;
+                Button btnOK = new Button() { Text = "実行", Left = 250, Top = 100, Width = 80 };
+                btnOK.DialogResult = DialogResult.OK;
 
-            txtDir.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
-            btnBrowse.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            txtSub.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+                txtDir.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+                btnBrowse.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+                txtSub.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
 
-            // ===== フォルダ選択 =====
-            btnBrowse.Click += (s, e) =>
-            {
-                using (var fbd = new FolderBrowserDialog())
+                // ===== フォルダ選択 =====
+                btnBrowse.Click += (s, e) =>
                 {
-                    if (fbd.ShowDialog() == DialogResult.OK)
-                        txtDir.Text = fbd.SelectedPath;
-                }
-            };
+                    using (var fbd = new FolderBrowserDialog())
+                    {
+                        if (fbd.ShowDialog() == DialogResult.OK)
+                            txtDir.Text = fbd.SelectedPath;
+                    }
+                };
 
-            // ===== ドラッグ＆ドロップ対応 =====
-            txtDir.AllowDrop = true;
+                // ===== ドラッグ＆ドロップ対応 =====
+                txtDir.AllowDrop = true;
 
-            txtDir.DragEnter += (s, e) =>
-            {
-                if (e.Data.GetDataPresent(DataFormats.FileDrop))
-                    e.Effect = DragDropEffects.Copy;
-            };
-
-            txtDir.DragDrop += (s, e) =>
-            {
-                var paths = (string[])e.Data.GetData(DataFormats.FileDrop);
-                if (paths.Length > 0 && Directory.Exists(paths[0]))
+                txtDir.DragEnter += (s, e) =>
                 {
-                    txtDir.Text = paths[0];
-                }
-            };
+                    if (e.Data.GetDataPresent(DataFormats.FileDrop))
+                        e.Effect = DragDropEffects.Copy;
+                };
+
+                txtDir.DragDrop += (s, e) =>
+                {
+                    var paths = (string[])e.Data.GetData(DataFormats.FileDrop);
+                    if (paths.Length > 0 && Directory.Exists(paths[0]))
+                        txtDir.Text = paths[0];
+                };
 
                 form.Controls.Add(lblDir);
                 form.Controls.Add(txtDir);
@@ -201,11 +199,11 @@ namespace PMXAssetRelinker
                 if (form.ShowDialog() != DialogResult.OK)
                     return false;
 
-            if (string.IsNullOrWhiteSpace(txtDir.Text))
-            {
-                MessageBox.Show("出力フォルダを指定してください");
-                return false;
-            }
+                if (string.IsNullOrWhiteSpace(txtDir.Text))
+                {
+                    MessageBox.Show("出力フォルダを指定してください");
+                    return false;
+                }
 
                 outputDir = txtDir.Text;
                 // 空欄の場合はサブフォルダを作らない（空文字のまま保持）
