@@ -79,8 +79,10 @@ namespace PMXAssetRelinker
                     mat.Toon = ProcessPath(mat.Toon);
                 }
 
-                args.Host.Connector.Pmx.Update(pmx);
-                args.Host.Connector.Form.UpdateList(PEPlugin.Pmd.UpdateObject.Header);
+                connect.Pmx.Update(pmx);
+                connect.Form.UpdateList(PEPlugin.Pmd.UpdateObject.Header);
+                connect.View.PMDView.UpdateModel();
+                connect.View.PMDView.UpdateView();
 
                 MessageBox.Show(
                     "書き出し完了！" + Environment.NewLine + Environment.NewLine +
